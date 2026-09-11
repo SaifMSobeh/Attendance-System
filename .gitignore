@@ -1,0 +1,8 @@
+node_modules/
+.env
+data.sqlite
+data.sqlite-*
+whatsapp-session/
+*.log
+dist/
+.wwebjs_cache/
