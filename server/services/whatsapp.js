@@ -1,10 +1,18 @@
+const fs = require("fs");
+const path = require("path");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const QRCode = require("qrcode");
 
+// Keep the LocalAuth session between server restarts. Removing this directory
+// forces the phone to be linked again and can interrupt an active QR login.
+const sessionDir = path.join(process.cwd(), "whatsapp-session");
+fs.mkdirSync(sessionDir, { recursive: true });
+
 // In-memory state the rest of the app (and the admin dashboard) can read.
 const state = {
-  status: "initializing", // initializing | qr | ready | disconnected | auth_failure
+  status: "initializing", // initializing | qr | authenticated | ready | disconnected | auth_failure
   qrDataUrl: null,
+  error: null,
 };
 
 const client = new Client({
@@ -27,6 +35,7 @@ const client = new Client({
 
 client.on("qr", async (qr) => {
   state.status = "qr";
+  state.error = null;
   state.qrDataUrl = await QRCode.toDataURL(qr);
   console.log("WhatsApp QR code ready. Open the admin dashboard's WhatsApp tab to scan it, or scan the terminal QR if your terminal supports it.");
 });
@@ -34,32 +43,86 @@ client.on("qr", async (qr) => {
 client.on("ready", () => {
   state.status = "ready";
   state.qrDataUrl = null;
+  state.error = null;
+  readyAt = Date.now();
   console.log("WhatsApp client is ready and connected.");
 });
 
 client.on("authenticated", () => {
+  state.status = "authenticated";
+  state.qrDataUrl = null;
+  state.error = null;
   console.log("WhatsApp authenticated.");
 });
 
 client.on("auth_failure", (msg) => {
   state.status = "auth_failure";
+  state.error = msg || "WhatsApp authentication failed.";
   console.error("WhatsApp authentication failed:", msg);
 });
 
+client.on("change_state", (stateName) => {
+  console.log("WhatsApp state changed:", stateName);
+  if (stateName === "CONNECTED") {
+    state.status = "ready";
+    state.qrDataUrl = null;
+    state.error = null;
+    readyAt = Date.now();
+  }
+});
+
+client.on("error", (err) => {
+  state.error = err?.message || "WhatsApp client error.";
+  console.error("WhatsApp client error:", err);
+});
+
 let reconnecting = false;
+let reconnectPromise = null;
+let readyAt = 0;
+
+function waitForReady(timeoutMs = 15000) {
+  if (state.status === "ready") return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      client.removeListener("ready", onReady);
+      reject(new Error(`WhatsApp did not become ready (status: ${state.status}).`));
+    }, timeoutMs);
+
+    function onReady() {
+      clearTimeout(timeout);
+      resolve();
+    }
+
+    client.once("ready", onReady);
+  });
+}
+
+function reconnectClient() {
+  if (reconnectPromise) return reconnectPromise;
+
+  reconnectPromise = (async () => {
+    state.status = "initializing";
+    await client.destroy().catch(() => {});
+    await client.initialize();
+    await waitForReady();
+  })().finally(() => {
+    reconnectPromise = null;
+  });
+
+  return reconnectPromise;
+}
 
 function attemptReconnect(delayMs = 3000) {
   if (reconnecting) return;
   reconnecting = true;
   setTimeout(async () => {
     try {
-      // whatsapp-web.js often won't issue a fresh QR if you just call
-      // initialize() again on a session it considers already ended —
-      // destroying first reliably forces a clean new session.
       await client.destroy().catch(() => {});
       await client.initialize();
     } catch (err) {
       state.status = "disconnected";
+      state.error = err?.message || "WhatsApp reconnect failed.";
       console.error("WhatsApp reconnect attempt failed:", err.message || err);
     } finally {
       reconnecting = false;
@@ -70,6 +133,7 @@ function attemptReconnect(delayMs = 3000) {
 client.on("disconnected", (reason) => {
   state.status = "disconnected";
   state.qrDataUrl = null;
+  state.error = String(reason || "WhatsApp disconnected.");
   console.warn("WhatsApp disconnected:", reason);
   // The phone unlinked the device (or lost connection). Bring up a fresh
   // session automatically so a new QR code appears without a server restart.
@@ -78,6 +142,7 @@ client.on("disconnected", (reason) => {
 
 client.initialize().catch((err) => {
   state.status = "disconnected";
+  state.error = err?.message || "WhatsApp failed to start.";
   console.error("WhatsApp failed to start:", err.message || err);
 });
 
@@ -99,7 +164,12 @@ async function sendMessage(phone, message) {
   if (state.status !== "ready") {
     return { ok: false, reason: `WhatsApp is not connected (status: ${state.status}).` };
   }
-  try {
+
+  const sendOnce = async () => {
+    const remainingWarmup = 2500 - (Date.now() - readyAt);
+    if (remainingWarmup > 0) {
+      await new Promise((resolve) => setTimeout(resolve, remainingWarmup));
+    }
     const chatId = toChatId(phone);
     const numberId = await client.getNumberId(chatId);
     if (!numberId) {
@@ -107,17 +177,39 @@ async function sendMessage(phone, message) {
     }
     await client.sendMessage(numberId._serialized, message);
     return { ok: true };
-  } catch (err) {
-    // Log the full error to the server terminal — the message shown in the
-    // dashboard is intentionally short, but the real cause (often a
-    // whatsapp-web.js/WhatsApp Web version mismatch) is in the stack trace.
-    console.error(`WhatsApp send failed for ${phone}:`, err);
-    return { ok: false, reason: err.message || "Failed to send message" };
+  };
+
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await sendOnce();
+    } catch (err) {
+      lastError = err;
+      const errorMessage = err?.message || "";
+      const transient = /detached frame|getChat|execution context was destroyed|target closed/i.test(errorMessage);
+      if (!transient || attempt === 2) break;
+
+      try {
+        if (/detached frame|execution context was destroyed|target closed/i.test(errorMessage)) {
+          await reconnectClient();
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      } catch (reconnectError) {
+        lastError = reconnectError;
+      }
+    }
   }
+
+  state.status = "disconnected";
+  console.error(`WhatsApp send failed for ${phone}:`, lastError);
+  return {
+    ok: false,
+    reason: "WhatsApp browser connection was refreshed, but the message could not be sent. Try again.",
+  };
 }
 
 function getStatus() {
-  return { status: state.status, qrDataUrl: state.qrDataUrl };
+  return { status: state.status, qrDataUrl: state.qrDataUrl, error: state.error };
 }
 
 function reconnectNow() {

@@ -24,4 +24,11 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin };
+function requireOwner(req, res, next) {
+  if (req.user.role !== "admin" || req.user.is_co_admin) {
+    return res.status(403).json({ error: "Owner admin access only." });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireAdmin, requireOwner };

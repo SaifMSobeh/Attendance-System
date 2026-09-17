@@ -55,6 +55,11 @@ export default function ScanView() {
                   type: "present",
                   message: `${result.student_name} — already marked present today`,
                 });
+              } else if (result.whatsapp?.already_sent) {
+                setScanResult({
+                  type: "present",
+                  message: `${result.student_name} marked present — parent was already notified`,
+                });
               } else if (result.whatsapp?.ok) {
                 setScanResult({
                   type: "present",

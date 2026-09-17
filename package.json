@@ -10,7 +10,8 @@
     "dev:client": "vite",
     "dev:server": "nodemon server.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^4.19.2",

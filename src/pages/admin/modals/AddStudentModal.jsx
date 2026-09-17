@@ -58,9 +58,10 @@ export default function AddStudentModal({
           />
         </div>
         <div className="field">
-          <label>Student phone (optional)</label>
+          <label>Student phone</label>
           <input
             name="phone"
+            required
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
           />

@@ -29,7 +29,7 @@ router.post("/:token", requireAuth, requireAdmin, async (req, res) => {
   const date = new Date().toISOString().slice(0, 10);
 
   const already = db
-    .prepare("SELECT status FROM attendance WHERE student_id = ? AND date = ?")
+    .prepare("SELECT status, notified FROM attendance WHERE student_id = ? AND date = ?")
     .get(student.id, date);
 
   if (already?.status === "present") {
@@ -43,11 +43,13 @@ router.post("/:token", requireAuth, requireAdmin, async (req, res) => {
   db.prepare(
     `INSERT INTO attendance (student_id, date, status)
      VALUES (?, ?, 'present')
-     ON CONFLICT(student_id, date) DO UPDATE SET status = 'present', notified = 0`
+     ON CONFLICT(student_id, date) DO UPDATE SET status = 'present'`
   ).run(student.id, date);
 
   let whatsappResult = null;
-  if (student.parent_phone) {
+  if (already?.notified) {
+    whatsappResult = { ok: true, already_sent: true };
+  } else if (student.parent_phone) {
     const admin = db.prepare("SELECT name FROM users WHERE role = 'admin' LIMIT 1").get();
     const message = buildMessage(student.name, date, admin?.name || "your teacher");
     whatsappResult = await whatsapp.sendMessage(student.parent_phone, message);

@@ -31,6 +31,30 @@ router.post("/", (req, res) => {
   }
 });
 
+router.get("/:id/students", (req, res) => {
+  db.expirePayments();
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  const group = db.prepare("SELECT id, name FROM groups WHERE id = ?").get(req.params.id);
+  if (!group) return res.status(404).json({ error: "Group not found." });
+
+  const students = db
+    .prepare(
+      `SELECT u.id, u.name, u.username, u.phone, u.parent_phone, u.monthly_fee,
+              p.paid AS paid_this_month
+       FROM users u
+       LEFT JOIN payments p
+         ON p.student_id = u.id AND p.month = ? AND p.year = ?
+       WHERE u.role = 'student' AND u.active = 1 AND u.group_id = ?
+       ORDER BY u.name`
+    )
+    .all(month, year, req.params.id)
+    .map((student) => ({ ...student, paid_this_month: !!student.paid_this_month }));
+
+  res.json({ ...group, students });
+});
+
 router.put("/:id", (req, res) => {
   const { name, schedule_info } = req.body;
   db.prepare("UPDATE groups SET name = ?, schedule_info = ? WHERE id = ?").run(

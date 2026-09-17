@@ -131,8 +131,28 @@ export default function StudentDashboard() {
                 <td className="muted">Username</td>
                 <td className="mono">{data.username}</td>
               </tr>
+              <tr>
+                <td className="muted">Student phone</td>
+                <td className="mono">{data.phone || "—"}</td>
+              </tr>
             </tbody>
           </table>
+        </div>
+
+        <div className="panel card student-qr-card">
+          <div className="card-header">
+            <h3>Student QR code</h3>
+          </div>
+          <div className="qr-box phone-qr-box">
+            {data.qrDataUrl ? (
+              <>
+                <img src={data.qrDataUrl} alt="Student check-in QR" width="180" height="180" />
+                <div className="muted">Scan this for quick check-in.</div>
+              </>
+            ) : (
+              <div className="empty-state">No QR code is available yet.</div>
+            )}
+          </div>
         </div>
 
         <div className="panel card">

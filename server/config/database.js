@@ -8,6 +8,51 @@ const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
+function isoDateFromDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addOneMonthToIsoDate(isoDate) {
+  if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return null;
+
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const source = new Date(year, month - 1, day);
+  if (isNaN(source.getTime())) return null;
+
+  const nextMonthNumber = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const lastDayOfNextMonth = new Date(nextYear, nextMonthNumber, 0).getDate();
+  const targetDay = Math.min(day, lastDayOfNextMonth);
+
+  const next = new Date(nextYear, nextMonthNumber - 1, targetDay);
+  return isoDateFromDate(next);
+}
+
+db.addOneMonthToIsoDate = addOneMonthToIsoDate;
+
+db.expirePayments = function expirePayments() {
+  const paidRows = db
+    .prepare("SELECT id, paid_date FROM payments WHERE paid = 1 AND paid_date IS NOT NULL")
+    .all();
+
+  const todayIso = isoDateFromDate(new Date());
+  const clear = db.prepare(
+    "UPDATE payments SET paid = 0, paid_date = NULL WHERE id = ?"
+  );
+
+  for (const row of paidRows) {
+    const expiryIso = addOneMonthToIsoDate(row.paid_date);
+    if (!expiryIso) continue;
+
+    if (todayIso >= expiryIso) {
+      clear.run(row.id);
+    }
+  }
+};
+
 // ---- Schema ----------------------------------------------------------
 
 db.exec(`
@@ -75,6 +120,9 @@ const crypto = require("crypto");
 const existingColumns = db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
 if (!existingColumns.includes("qr_token")) {
   db.exec("ALTER TABLE users ADD COLUMN qr_token TEXT");
+}
+if (!existingColumns.includes("is_co_admin")) {
+  db.exec("ALTER TABLE users ADD COLUMN is_co_admin INTEGER NOT NULL DEFAULT 0");
 }
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_qr_token ON users(qr_token)");
 

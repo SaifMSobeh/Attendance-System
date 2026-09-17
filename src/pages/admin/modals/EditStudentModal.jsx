@@ -95,6 +95,7 @@ export default function EditStudentModal({
           <label>Student phone</label>
           <input
             name="phone"
+            required
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
           />

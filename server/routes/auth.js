@@ -21,14 +21,14 @@ router.post("/login", (req, res) => {
   }
 
   const token = jwt.sign(
-    { id: user.id, role: user.role, name: user.name },
+    { id: user.id, role: user.role, name: user.name, is_co_admin: !!user.is_co_admin },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
   );
 
   res.json({
     token,
-    user: { id: user.id, name: user.name, role: user.role },
+    user: { id: user.id, name: user.name, role: user.role, is_co_admin: !!user.is_co_admin },
   });
 });
 

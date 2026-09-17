@@ -199,6 +199,12 @@ table {
   font-size: 14px;
 }
 
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 th {
   text-align: left;
   color: var(--text-muted);
@@ -466,6 +472,18 @@ tbody tr:hover {
   width: auto;
 }
 
+.apply-session-btn {
+  min-height: 38px;
+  padding: 8px 14px;
+  white-space: nowrap;
+}
+
+.apply-session-btn:disabled {
+  background: var(--cyan-dim);
+  border-color: var(--cyan-dim);
+  color: var(--text-muted);
+}
+
 .attendance-toggle {
   display: inline-flex;
   border: 1px solid var(--panel-border);
@@ -602,24 +620,101 @@ tbody tr:hover {
   box-shadow: 0 0 8px var(--coral);
 }
 
+.student-qr-card {
+  order: 2;
+}
+
 @media (max-width: 820px) {
   .app-shell {
     flex-direction: column;
   }
+
   .sidebar {
     width: 100%;
     height: auto;
     position: static;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
     padding: 14px 16px;
   }
+
+  .sidebar-brand,
+  .sidebar-name {
+    flex-basis: auto;
+    margin-bottom: 0;
+  }
+
+  .nav-item {
+    width: auto;
+    margin: 4px 0;
+  }
+
   .sidebar-footer {
     position: static;
+    width: 100%;
     margin-top: 0;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
   }
+
+  .sidebar-footer .btn {
+    width: auto !important;
+    flex: 1 1 140px;
+  }
+
   .main {
     padding: 24px 18px 50px;
+    max-width: none;
+    overflow-x: hidden;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .student-qr-card {
+    order: 1;
+  }
+
+  .phone-qr-box {
+    padding: 8px 0 16px;
+  }
+
+  .phone-qr-box img {
+    width: 168px;
+    height: 168px;
+  }
+
+  .toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar select,
+  .toolbar input {
+    width: 100%;
+  }
+
+  table {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .modal-backdrop {
+    align-items: flex-start;
+    overflow-y: auto;
+  }
+
+  .modal-actions {
+    justify-content: stretch;
+    flex-wrap: wrap;
+  }
+
+  .modal-actions .btn {
+    flex: 1 1 auto;
   }
 }

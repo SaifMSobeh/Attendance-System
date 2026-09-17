@@ -4,6 +4,8 @@ const crypto = require("crypto");
 const QRCode = require("qrcode");
 const db = require("../config/database");
 const { requireAuth, requireAdmin } = require("../middleware/auth");
+const whatsapp = require("../services/whatsapp");
+const { formatCredentialMessage } = require("../services/credentialMessages");
 
 const router = express.Router();
 router.use(requireAuth, requireAdmin);
@@ -38,9 +40,12 @@ function randomPassword() {
 
 // List all students with quick-glance stats (group, this month's payment, attendance rate)
 router.get("/", (req, res) => {
+  db.expirePayments();
+
   const now = new Date();
   const month = now.getMonth() + 1;
   const year = now.getFullYear();
+  const search = String(req.query.search || "").trim().toLowerCase();
 
   const students = db
     .prepare(
@@ -74,11 +79,21 @@ router.get("/", (req, res) => {
     };
   });
 
-  res.json(result);
+  const filtered = search
+    ? result.filter((s) =>
+        `${s.name} ${s.username} ${s.phone || ""} ${s.parent_phone || ""} ${s.group_name || ""}`
+          .toLowerCase()
+          .includes(search)
+      )
+    : result;
+
+  res.json(filtered);
 });
 
 // Full profile for one student
 router.get("/:id", (req, res) => {
+  db.expirePayments();
+
   const student = db
     .prepare(
       `SELECT u.id, u.name, u.username, u.phone, u.parent_phone, u.monthly_fee,
@@ -112,12 +127,12 @@ router.get("/:id", (req, res) => {
 });
 
 // Create a new student (auto-generates login credentials)
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
   const { name, phone, parent_phone, group_id, monthly_fee } = req.body;
-  if (!name || !parent_phone) {
+  if (!name || !phone || !parent_phone) {
     return res
       .status(400)
-      .json({ error: "Student name and parent WhatsApp number are required." });
+      .json({ error: "Student name, student phone and parent WhatsApp number are required." });
   }
 
   const username = uniqueUsername(name);
@@ -141,19 +156,33 @@ router.post("/", (req, res) => {
       qrToken
     );
 
+  let whatsappResult = null;
+  const studentPhone = String(phone || "").trim();
+  if (studentPhone) {
+    const message = formatCredentialMessage(username, password);
+    whatsappResult = await whatsapp.sendMessage(studentPhone, message);
+  }
+
   res.status(201).json({
     id: result.lastInsertRowid,
     username,
-    password, // shown once — give this to the student, it is not recoverable later
+    password,
+    whatsapp: whatsappResult || { ok: false, reason: "No student phone number on file." },
   });
 });
 
 router.put("/:id", (req, res) => {
   const { name, phone, parent_phone, group_id, monthly_fee } = req.body;
+  if (!name || !phone || !parent_phone) {
+    return res
+      .status(400)
+      .json({ error: "Student name, student phone and parent WhatsApp number are required." });
+  }
+
   db.prepare(
     `UPDATE users SET name = ?, phone = ?, parent_phone = ?, group_id = ?, monthly_fee = ?
      WHERE id = ? AND role = 'student'`
-  ).run(name, phone || null, parent_phone, group_id || null, monthly_fee || 0, req.params.id);
+  ).run(name.trim(), phone, parent_phone, group_id || null, monthly_fee || 0, req.params.id);
   res.json({ ok: true });
 });
 

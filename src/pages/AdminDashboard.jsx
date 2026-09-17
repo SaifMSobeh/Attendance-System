@@ -10,6 +10,7 @@ import ScanView from "./admin/ScanView";
 import ExamsView from "./admin/ExamsView";
 import PaymentsView from "./admin/PaymentsView";
 import WhatsAppView from "./admin/WhatsAppView";
+import TeamAccountsView from "./admin/TeamAccountsView";
 import { useAuth } from "../context/AuthContext";
 
 const NAV_ITEMS = [
@@ -24,7 +25,7 @@ const NAV_ITEMS = [
 ];
 
 export default function AdminDashboard() {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const [currentView, setCurrentView] = useState("overview");
   const [selectedStudentId, setSelectedStudentId] = useState(null);
   const [isPwModalOpen, setIsPwModalOpen] = useState(false);
@@ -41,12 +42,15 @@ export default function AdminDashboard() {
 
   const activeNavId =
     currentView === "student-detail" ? "students" : currentView;
+  const navItems = user?.is_co_admin
+    ? NAV_ITEMS
+    : [...NAV_ITEMS, { id: "team", label: "Team accounts" }];
 
   return (
     <div className="app-shell">
       <Sidebar
         title="Admin"
-        navItems={NAV_ITEMS}
+        navItems={navItems}
         activeId={activeNavId}
         onSelect={handleSelectView}
         onChangePassword={() => setIsPwModalOpen(true)}
@@ -66,7 +70,9 @@ export default function AdminDashboard() {
             onBack={() => setCurrentView("students")}
           />
         )}
-        {currentView === "groups" && <GroupsView />}
+        {currentView === "groups" && (
+          <GroupsView onSelectStudent={handleSelectStudent} />
+        )}
         {currentView === "attendance" && <AttendanceView />}
         {currentView === "scan" && <ScanView />}
         {currentView === "exams" && (
@@ -74,6 +80,7 @@ export default function AdminDashboard() {
         )}
         {currentView === "payments" && <PaymentsView />}
         {currentView === "whatsapp" && <WhatsAppView />}
+        {currentView === "team" && !user?.is_co_admin && <TeamAccountsView />}
       </main>
 
       <ChangePasswordModal

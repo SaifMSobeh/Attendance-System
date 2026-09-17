@@ -13,12 +13,13 @@ export default function StudentsView({ onSelectStudent }) {
   const [editingStudent, setEditingStudent] = useState(null);
   const [newCredentials, setNewCredentials] = useState(null);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [search, setSearch] = useState("");
   const { toast } = useToast();
 
   const loadData = useCallback(async () => {
     try {
       const [studentsData, groupsData] = await Promise.all([
-        api("/students"),
+        api(`/students?search=${encodeURIComponent(search)}`),
         api("/groups"),
       ]);
       setStudents(studentsData);
@@ -28,7 +29,7 @@ export default function StudentsView({ onSelectStudent }) {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, search]);
 
   useEffect(() => {
     loadData();
@@ -111,58 +112,72 @@ export default function StudentsView({ onSelectStudent }) {
       </div>
 
       <div className="panel card">
+        <div className="toolbar" style={{ marginBottom: "12px" }}>
+          <div style={{ flex: 1 }}>
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search students"
+              style={{ width: "100%", maxWidth: "360px" }}
+            />
+          </div>
+        </div>
+
         {students.length === 0 ? (
           <div className="empty-state">
             No students yet. Add one from the button above.
           </div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Group</th>
-                <th>Attendance</th>
-                <th>This month</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {students.map((s) => (
-                <tr
-                  key={s.id}
-                  className="student-row"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => onSelectStudent(s.id)}
-                >
-                  <td>{s.name}</td>
-                  <td className="muted">{s.group_name || "—"}</td>
-                  <td className="mono">
-                    {s.attendance_rate === null ? "—" : `${s.attendance_rate}%`}
-                  </td>
-                  <td>
-                    <span
-                      className={`pill pill-${
-                        s.paid_this_month ? "paid" : "unpaid"
-                      }`}
-                    >
-                      {s.paid_this_month ? "paid" : "unpaid"}
-                    </span>
-                  </td>
-                  <td>
-                    <button
-                      className="btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingStudent(s);
-                      }}
-                    >
-                      Edit
-                    </button>
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Group</th>
+                  <th>Attendance</th>
+                  <th>This month</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {students.map((s) => (
+                  <tr
+                    key={s.id}
+                    className="student-row"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => onSelectStudent(s.id)}
+                  >
+                    <td>{s.name}</td>
+                    <td className="muted">{s.group_name || "—"}</td>
+                    <td className="mono">
+                      {s.attendance_rate === null ? "—" : `${s.attendance_rate}%`}
+                    </td>
+                    <td>
+                      <span
+                        className={`pill pill-${
+                          s.paid_this_month ? "paid" : "unpaid"
+                        }`}
+                      >
+                        {s.paid_this_month ? "paid" : "unpaid"}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        className="btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingStudent(s);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

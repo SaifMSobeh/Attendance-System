@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
+import StatCard from "../../components/StatCard";
 import { api, MONTH_NAMES } from "../../api";
 import { useToast } from "../../context/ToastContext";
+import { useAuth } from "../../context/AuthContext";
 
 export default function PaymentsView() {
   const now = new Date();
@@ -9,16 +11,27 @@ export default function PaymentsView() {
   const [rows, setRows] = useState([]);
   const [amounts, setAmounts] = useState({});
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [totals, setTotals] = useState(null);
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const loadPayments = useCallback(
-    async (m, y) => {
+    async (m, y, query = "") => {
       setLoading(true);
       try {
-        const data = await api(`/payments/overview?month=${m}&year=${y}`);
-        setRows(data);
+        const data = await api(
+          `/payments/overview?month=${m}&year=${y}&search=${encodeURIComponent(query)}`
+        );
+        const paymentRows = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.rows)
+            ? data.rows
+            : [];
+        setRows(paymentRows);
+        setTotals(!Array.isArray(data) && data?.totals ? data.totals : null);
         const initialAmounts = {};
-        data.forEach((r) => {
+        paymentRows.forEach((r) => {
           initialAmounts[r.student_id] = r.amount;
         });
         setAmounts(initialAmounts);
@@ -32,8 +45,8 @@ export default function PaymentsView() {
   );
 
   useEffect(() => {
-    loadPayments(month, year);
-  }, [month, year, loadPayments]);
+    loadPayments(month, year, search);
+  }, [month, year, search, loadPayments]);
 
   const handleAmountChange = (studentId, val) => {
     setAmounts((prev) => ({ ...prev, [studentId]: val }));
@@ -46,7 +59,7 @@ export default function PaymentsView() {
     const amountVal = Number(amounts[studentId] ?? row.amount);
 
     try {
-      await api("/payments", {
+      const result = await api("/payments", {
         method: "POST",
         body: {
           student_id: studentId,
@@ -56,8 +69,12 @@ export default function PaymentsView() {
           paid: newPaid,
         },
       });
-      toast(newPaid ? "Marked as paid." : "Marked as unpaid.");
-      loadPayments(month, year);
+      if (newPaid && result.whatsapp && !result.whatsapp.ok) {
+        toast(`Payment saved, but WhatsApp failed: ${result.whatsapp.reason}`, false);
+      } else {
+        toast(newPaid ? "Marked as paid and parent notified." : "Marked as unpaid.");
+      }
+      loadPayments(month, year, search);
     } catch (err) {
       toast(err.message, false);
     }
@@ -98,7 +115,24 @@ export default function PaymentsView() {
               onChange={(e) => setYear(Number(e.target.value))}
             />
           </div>
+          <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search payments"
+              style={{ width: "100%", maxWidth: "280px" }}
+            />
+          </div>
         </div>
+
+        {user && !user.is_co_admin && totals && (
+          <div className="stat-grid" style={{ marginBottom: "18px" }}>
+            <StatCard label="Expected this month" value={totals.expected.toLocaleString()} />
+            <StatCard label="Received this month" value={totals.received.toLocaleString()} />
+            <StatCard label="Remaining this month" value={totals.remaining.toLocaleString()} coral={totals.remaining > 0} />
+          </div>
+        )}
 
         {loading ? (
           <div className="empty-state">Loading payments…</div>

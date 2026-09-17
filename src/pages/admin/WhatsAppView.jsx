@@ -5,6 +5,7 @@ import { useToast } from "../../context/ToastContext";
 const STATUS_LABELS = {
   initializing: "Starting up…",
   qr: "Scan the QR code below with WhatsApp on Mr. Hossam's phone",
+  authenticated: "Phone authenticated — loading WhatsApp, please wait…",
   ready: "Connected — notifications will send automatically",
   disconnected:
     "Disconnected — reconnecting automatically, a new QR code should appear shortly",
@@ -31,7 +32,7 @@ export default function WhatsAppView() {
 
   useEffect(() => {
     pollStatus();
-    const interval = setInterval(pollStatus, 4000);
+    const interval = setInterval(pollStatus, 2000);
     return () => clearInterval(interval);
   }, [pollStatus]);
 
@@ -66,6 +67,11 @@ export default function WhatsAppView() {
         <div id="wa-status" style={{ marginBottom: "16px" }}>
           <span className={`status-dot ${waData.status}`}></span>
           <span>{STATUS_LABELS[waData.status] || waData.status}</span>
+          {waData.error && waData.status !== "ready" && (
+            <div className="muted" style={{ marginTop: "8px", maxWidth: "700px" }}>
+              {waData.error}
+            </div>
+          )}
           {showReconnectBtn && (
             <button
               className="btn"

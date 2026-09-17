@@ -9,6 +9,8 @@ export default function AttendanceView() {
   const [roster, setRoster] = useState([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [loadingRoster, setLoadingRoster] = useState(false);
+  const [applyingSession, setApplyingSession] = useState(false);
+  const [sessionApplied, setSessionApplied] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -36,6 +38,7 @@ export default function AttendanceView() {
         `/attendance/roster?group_id=${groupId}&date=${selectedDate}`
       );
       setRoster(Array.isArray(data) ? data : []);
+      setSessionApplied(Array.isArray(data) && data.some((student) => student.status));
     } catch (err) {
       toast(err.message, false);
       setRoster([]);
@@ -44,6 +47,24 @@ export default function AttendanceView() {
     }
   }, [toast]);
 
+  const applySession = async () => {
+    if (!selectedGroupId || !date) return;
+    setApplyingSession(true);
+    try {
+      await api("/attendance/session", {
+        method: "POST",
+        body: { group_id: Number(selectedGroupId), date },
+      });
+      setSessionApplied(true);
+      await loadRoster(selectedGroupId, date);
+      toast("Session applied to the selected group.");
+    } catch (err) {
+      toast(err.message, false);
+    } finally {
+      setApplyingSession(false);
+    }
+  };
+
   useEffect(() => {
     if (selectedGroupId && date) {
       loadRoster(selectedGroupId, date);
@@ -51,19 +72,20 @@ export default function AttendanceView() {
   }, [selectedGroupId, date, loadRoster]);
 
   const handleToggle = async (studentId, status) => {
-    // Optimistically update
-    setRoster((prev) =>
-      prev.map((s) => (s.id === studentId ? { ...s, status } : s))
-    );
-
     try {
       const result = await api("/attendance", {
         method: "POST",
         body: { student_id: studentId, date, status },
       });
 
+      setRoster((prev) =>
+        prev.map((s) => (s.id === studentId ? { ...s, status } : s))
+      );
+
       if (status === "present") {
-        if (result.whatsapp?.ok) {
+          if (result.whatsapp?.already_sent) {
+            toast("Marked present — parent was already notified for this session.");
+          } else if (result.whatsapp?.ok) {
           toast("Marked present — parent notified on WhatsApp.");
         } else {
           toast(
@@ -78,7 +100,6 @@ export default function AttendanceView() {
       }
     } catch (err) {
       toast(err.message, false);
-      // Revert if error
       loadRoster(selectedGroupId, date);
     }
   };
@@ -127,6 +148,17 @@ export default function AttendanceView() {
               onChange={(e) => setDate(e.target.value)}
             />
           </div>
+          <div>
+            <label>Apply session</label>
+            <button
+              type="button"
+              className="btn btn-primary apply-session-btn"
+              onClick={applySession}
+              disabled={applyingSession || !selectedGroupId}
+            >
+              {applyingSession ? "Applying…" : "Apply to selected group"}
+            </button>
+          </div>
         </div>
 
         {groups.length === 0 ? (
@@ -136,45 +168,49 @@ export default function AttendanceView() {
         ) : roster.length === 0 ? (
           <div className="empty-state">No students in this group yet.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Parent WhatsApp</th>
-                <th>Attendance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {roster.map((s) => (
-                <tr key={s.id}>
-                  <td>{s.name}</td>
-                  <td className="muted mono">{s.parent_phone || "—"}</td>
-                  <td>
-                    <div className="attendance-toggle">
-                      <button
-                        type="button"
-                        className={`present ${
-                          s.status === "present" ? "active" : ""
-                        }`}
-                        onClick={() => handleToggle(s.id, "present")}
-                      >
-                        Present
-                      </button>
-                      <button
-                        type="button"
-                        className={`absent ${
-                          s.status === "absent" ? "active" : ""
-                        }`}
-                        onClick={() => handleToggle(s.id, "absent")}
-                      >
-                        Absent
-                      </button>
-                    </div>
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Parent WhatsApp</th>
+                  <th>Attendance</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {roster.map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.name}</td>
+                    <td className="muted mono">{s.parent_phone || "—"}</td>
+                    <td>
+                      <div className="attendance-toggle">
+                        <button
+                          type="button"
+                          className={`present ${
+                            s.status === "present" ? "active" : ""
+                          }`}
+                          onClick={() => handleToggle(s.id, "present")}
+                          disabled={!sessionApplied}
+                        >
+                          Present
+                        </button>
+                        <button
+                          type="button"
+                          className={`absent ${
+                            s.status === "absent" ? "active" : ""
+                          }`}
+                          onClick={() => handleToggle(s.id, "absent")}
+                          disabled={!sessionApplied}
+                        >
+                          Absent
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </section>

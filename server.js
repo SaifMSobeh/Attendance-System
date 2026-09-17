@@ -26,6 +26,7 @@ const paymentRoutes = require("./server/routes/payments");
 const meRoutes = require("./server/routes/me");
 const whatsappRoutes = require("./server/routes/whatsapp");
 const checkinRoutes = require("./server/routes/checkin");
+const teamRoutes = require("./server/routes/team");
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/me", meRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/checkin", checkinRoutes);
+app.use("/api/team", teamRoutes);
 
 const distPath = path.join(__dirname, "dist");
 const publicPath = path.join(__dirname, "public");

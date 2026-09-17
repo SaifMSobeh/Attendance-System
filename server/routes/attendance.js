@@ -5,6 +5,42 @@ const whatsapp = require("../services/whatsapp");
 
 const router = express.Router();
 
+function ensureGroupSessionAbsences(groupId, date) {
+  if (!groupId || !date) return;
+
+  const students = db
+    .prepare(
+      `SELECT id FROM users
+       WHERE role = 'student' AND active = 1 AND group_id = ?
+       ORDER BY id`
+    )
+    .all(groupId);
+
+  if (students.length === 0) return;
+
+  const insertMissingAbsent = db.prepare(
+    `INSERT INTO attendance (student_id, date, status)
+     VALUES (?, ?, 'absent')
+     ON CONFLICT(student_id, date) DO NOTHING`
+  );
+
+  for (const student of students) {
+    insertMissingAbsent.run(student.id, date);
+  }
+}
+
+router.ensureGroupSessionAbsences = ensureGroupSessionAbsences;
+
+router.post("/session", requireAuth, requireAdmin, (req, res) => {
+  const { group_id, date } = req.body;
+  if (!group_id || !date) {
+    return res.status(400).json({ error: "group_id and date are required." });
+  }
+
+  ensureGroupSessionAbsences(Number(group_id), String(date));
+  res.json({ ok: true });
+});
+
 function buildMessage(studentName, date, teacherName) {
   return (
     `Hello,\n` +
@@ -43,15 +79,23 @@ router.get("/roster", requireAuth, requireAdmin, (req, res) => {
 
 // Shared logic: record a mark, and if present, notify the parent on WhatsApp.
 async function markAttendance(studentId, date, status) {
+  const existing = db
+    .prepare("SELECT status, notified FROM attendance WHERE student_id = ? AND date = ?")
+    .get(studentId, date);
+
   db.prepare(
     `INSERT INTO attendance (student_id, date, status)
      VALUES (?, ?, ?)
-     ON CONFLICT(student_id, date) DO UPDATE SET status = excluded.status, notified = 0`
+     ON CONFLICT(student_id, date) DO UPDATE SET status = excluded.status`
   ).run(studentId, date, status);
 
-  let whatsappResult = null;
+    let whatsappResult = null;
 
-  if (status === "present") {
+    if (status === "present" && existing?.notified) {
+      return { ok: true, already_sent: true };
+    }
+
+    if (status === "present") {
     const student = db
       .prepare("SELECT name, parent_phone FROM users WHERE id = ?")
       .get(studentId);
