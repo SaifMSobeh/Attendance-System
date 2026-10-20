@@ -117,13 +117,20 @@ router.get("/:id", (req, res) => {
     )
     .all(req.params.id);
 
-  const payments = db
-    .prepare(
-      "SELECT id, month, year, amount, paid, paid_date FROM payments WHERE student_id = ? ORDER BY year DESC, month DESC"
-    )
-    .all(req.params.id);
+  const payments = db.prepare(
+    `SELECT id, month, year, amount, paid, paid_date, NULL AS note, 'legacy' AS source
+     FROM payments WHERE student_id = ?
+     UNION ALL
+     SELECT id, month, year, amount, 1 AS paid, paid_date, note, 'transaction' AS source
+     FROM payment_transactions WHERE student_id = ?
+     ORDER BY year DESC, month DESC, paid_date DESC, id DESC`
+  ).all(req.params.id, req.params.id);
 
-  res.json({ ...student, attendance, exams, payments });
+  const visiblePayments = req.user.is_co_admin
+    ? payments.map(({ note, ...payment }) => payment)
+    : payments;
+
+  res.json({ ...student, attendance, exams, payments: visiblePayments });
 });
 
 // Create a new student (auto-generates login credentials)

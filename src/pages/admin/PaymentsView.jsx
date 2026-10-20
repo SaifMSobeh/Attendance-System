@@ -1,15 +1,19 @@
 import React, { useState, useEffect, useCallback } from "react";
+import Modal from "../../components/Modal";
 import StatCard from "../../components/StatCard";
 import { api, MONTH_NAMES } from "../../api";
 import { useToast } from "../../context/ToastContext";
 import { useAuth } from "../../context/AuthContext";
 
-export default function PaymentsView() {
+export default function PaymentsView({ onSelectStudent }) {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
   const [rows, setRows] = useState([]);
-  const [amounts, setAmounts] = useState({});
+  const [paymentStudent, setPaymentStudent] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [processingPayment, setProcessingPayment] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [totals, setTotals] = useState(null);
@@ -30,11 +34,6 @@ export default function PaymentsView() {
             : [];
         setRows(paymentRows);
         setTotals(!Array.isArray(data) && data?.totals ? data.totals : null);
-        const initialAmounts = {};
-        paymentRows.forEach((r) => {
-          initialAmounts[r.student_id] = r.amount;
-        });
-        setAmounts(initialAmounts);
       } catch (err) {
         toast(err.message, false);
       } finally {
@@ -48,16 +47,19 @@ export default function PaymentsView() {
     loadPayments(month, year, search);
   }, [month, year, search, loadPayments]);
 
-  const handleAmountChange = (studentId, val) => {
-    setAmounts((prev) => ({ ...prev, [studentId]: val }));
+  const openPayment = (row) => {
+    setPaymentStudent(row);
+    setPaymentAmount(String(row.remaining > 0 ? row.remaining : row.monthly_fee || ""));
+    setPaymentNote("");
   };
 
-  const handleTogglePayment = async (row) => {
-    const studentId = row.student_id;
-    const currentPaid = !!row.paid;
-    const newPaid = !currentPaid;
-    const amountVal = Number(amounts[studentId] ?? row.amount);
+  const handlePayment = async (event) => {
+    event.preventDefault();
+    if (!paymentStudent) return;
+    const studentId = paymentStudent.student_id;
+    const amountVal = Number(paymentAmount);
 
+    setProcessingPayment(true);
     try {
       const result = await api("/payments", {
         method: "POST",
@@ -66,17 +68,21 @@ export default function PaymentsView() {
           month: Number(month),
           year: Number(year),
           amount: amountVal,
-          paid: newPaid,
+          note: paymentNote,
         },
       });
-      if (newPaid && result.whatsapp && !result.whatsapp.ok) {
+      if (result.whatsapp && !result.whatsapp.ok) {
         toast(`Payment saved, but WhatsApp failed: ${result.whatsapp.reason}`, false);
       } else {
-        toast(newPaid ? "Marked as paid and parent notified." : "Marked as unpaid.");
+        toast("Payment saved and parent notified.");
       }
+      setPaymentStudent(null);
+      setPaymentNote("");
       loadPayments(month, year, search);
     } catch (err) {
       toast(err.message, false);
+    } finally {
+      setProcessingPayment(false);
     }
   };
 
@@ -131,6 +137,9 @@ export default function PaymentsView() {
             <StatCard label="Expected this month" value={totals.expected.toLocaleString()} />
             <StatCard label="Received this month" value={totals.received.toLocaleString()} />
             <StatCard label="Remaining this month" value={totals.remaining.toLocaleString()} coral={totals.remaining > 0} />
+            {totals.over_expected > 0 && (
+              <StatCard label="Recorded above expected" value={totals.over_expected.toLocaleString()} coral />
+            )}
           </div>
         )}
 
@@ -143,7 +152,10 @@ export default function PaymentsView() {
             <thead>
               <tr>
                 <th>Student</th>
-                <th>Amount</th>
+                <th>Monthly fee</th>
+                <th>Received</th>
+                <th>Remaining</th>
+                <th>Above fee</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -151,32 +163,38 @@ export default function PaymentsView() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.student_id}>
-                  <td>{r.name}</td>
-                  <td className="mono">
-                    <input
-                      type="number"
-                      value={amounts[r.student_id] ?? r.amount}
-                      onChange={(e) =>
-                        handleAmountChange(r.student_id, e.target.value)
-                      }
-                      style={{ width: "90px", padding: "6px 8px" }}
-                    />
+                  <td>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ padding: 0, border: 0, color: "var(--cyan)" }}
+                      onClick={() => onSelectStudent(r.student_id)}
+                    >
+                      {r.name}
+                    </button>
                   </td>
+                  <td className="mono">
+                    {Number(r.monthly_fee || 0) > 0 ? Number(r.monthly_fee).toLocaleString() : "Not set"}
+                  </td>
+                  <td className="mono">{Number(r.total_paid || 0).toLocaleString()}</td>
+                  <td className="mono">{Number(r.monthly_fee || 0) > 0 ? Number(r.remaining || 0).toLocaleString() : "—"}</td>
+                  <td className="mono">{Number(r.monthly_fee || 0) > 0 ? Math.max(Number(r.total_paid || 0) - Number(r.monthly_fee || 0), 0).toLocaleString() : "—"}</td>
                   <td>
                     <span
-                      className={`pill pill-${r.paid ? "paid" : "unpaid"}`}
+                      className={`pill pill-${r.paid ? "paid" : r.total_paid > 0 ? "neutral" : "unpaid"}`}
                       id={`pay-pill-${r.student_id}`}
                     >
-                      {r.paid ? "paid" : "unpaid"}
+                      {r.paid ? "paid" : r.total_paid > 0 ? "partial" : "unpaid"}
                     </span>
                   </td>
                   <td>
                     <button
                       type="button"
-                      className={`btn ${r.paid ? "btn-danger" : "btn-primary"}`}
-                      onClick={() => handleTogglePayment(r)}
+                      className="btn btn-primary"
+                      onClick={() => openPayment(r)}
+                      disabled={Number(r.monthly_fee || 0) > 0 && r.remaining <= 0}
                     >
-                      {r.paid ? "Mark unpaid" : "Mark paid"}
+                      {Number(r.monthly_fee || 0) > 0 && r.remaining <= 0 ? "Paid" : "Record payment"}
                     </button>
                   </td>
                 </tr>
@@ -185,6 +203,54 @@ export default function PaymentsView() {
           </table>
         )}
       </div>
+      <Modal
+        isOpen={!!paymentStudent}
+        onClose={() => setPaymentStudent(null)}
+        title={paymentStudent ? `Payment for ${paymentStudent.name}` : "Record payment"}
+        maxWidth={440}
+      >
+        {paymentStudent && (
+          <form onSubmit={handlePayment}>
+            <p className="muted" style={{ marginTop: 0 }}>
+              {Number(paymentStudent.monthly_fee || 0) > 0
+                ? `Received ${paymentStudent.total_paid}; remaining ${paymentStudent.remaining}.`
+                : `No monthly fee is set. Enter the amount received.`}
+            </p>
+            <div className="field">
+              <label htmlFor="payment-amount">Amount received</label>
+              <input
+                id="payment-amount"
+                type="number"
+                min="0.01"
+                max={Number(paymentStudent.monthly_fee || 0) > 0 ? paymentStudent.remaining : undefined}
+                step="0.01"
+                required
+                autoFocus
+                value={paymentAmount}
+                onChange={(event) => setPaymentAmount(event.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="payment-note">Note</label>
+              <textarea
+                id="payment-note"
+                rows="3"
+                value={paymentNote}
+                onChange={(event) => setPaymentNote(event.target.value)}
+                placeholder="Optional"
+              />
+            </div>
+            <div className="toolbar" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="btn" onClick={() => setPaymentStudent(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" disabled={processingPayment}>
+                {processingPayment ? "Saving…" : "Save payment"}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </section>
   );
 }

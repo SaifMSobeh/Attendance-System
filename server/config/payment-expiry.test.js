@@ -20,24 +20,39 @@ test('formats a student login credential message for WhatsApp', () => {
 
 test('hydrates a selected attendance session date into absent rows for all active students in a group', () => {
   const date = '2026-09-15';
-  const groupName = `test-session-${Date.now()}`;
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const groupName = `test-session-${suffix}`;
   const groupId = db.prepare('INSERT INTO groups (name) VALUES (?)').run(groupName).lastInsertRowid;
-  const studentOne = db.prepare(
-    `INSERT INTO users (name, username, password_hash, role, group_id, active)
-     VALUES (?, ?, ?, 'student', ?, 1)`
-  ).run(`Test Session One ${Date.now()}`, `testsessionone${Date.now()}`, 'hash', groupId);
-  const studentTwo = db.prepare(
-    `INSERT INTO users (name, username, password_hash, role, group_id, active)
-     VALUES (?, ?, ?, 'student', ?, 1)`
-  ).run(`Test Session Two ${Date.now()}`, `testsessiontwo${Date.now()}`, 'hash', groupId);
+  const studentIds = [];
+  try {
+    const studentOne = db.prepare(
+      `INSERT INTO users (name, username, password_hash, role, group_id, active)
+       VALUES (?, ?, ?, 'student', ?, 1)`
+    ).run(`Test Session One ${suffix}`, `testsessionone${suffix}`, 'hash', groupId);
+    studentIds.push(studentOne.lastInsertRowid);
+    const studentTwo = db.prepare(
+      `INSERT INTO users (name, username, password_hash, role, group_id, active)
+       VALUES (?, ?, ?, 'student', ?, 1)`
+    ).run(`Test Session Two ${suffix}`, `testsessiontwo${suffix}`, 'hash', groupId);
+    studentIds.push(studentTwo.lastInsertRowid);
 
-  attendanceRouter.ensureGroupSessionAbsences(groupId, date);
+    attendanceRouter.ensureGroupSessionAbsences(groupId, date);
 
-  const rows = db.prepare(
-    `SELECT student_id, date, status FROM attendance
-     WHERE date = ? AND student_id IN (?, ?) ORDER BY student_id`
-  ).all(date, studentOne.lastInsertRowid, studentTwo.lastInsertRowid);
+    const rows = db.prepare(
+      `SELECT student_id, date, status FROM attendance
+       WHERE date = ? AND student_id IN (?, ?) ORDER BY student_id`
+    ).all(date, ...studentIds);
 
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows.map((r) => r.status), ['absent', 'absent']);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map((r) => r.status), ['absent', 'absent']);
+  } finally {
+    const cleanup = db.transaction(() => {
+      if (studentIds.length) {
+        const deleteStudents = db.prepare('DELETE FROM users WHERE id = ?');
+        studentIds.forEach((studentId) => deleteStudents.run(studentId));
+      }
+      db.prepare('DELETE FROM groups WHERE id = ?').run(groupId);
+    });
+    cleanup();
+  }
 });

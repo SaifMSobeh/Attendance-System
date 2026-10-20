@@ -34,23 +34,36 @@ router.post("/", (req, res) => {
 router.get("/:id/students", (req, res) => {
   db.expirePayments();
   const now = new Date();
-  const month = now.getMonth() + 1;
-  const year = now.getFullYear();
+  const month = Number(req.query.month) || now.getMonth() + 1;
+  const year = Number(req.query.year) || now.getFullYear();
   const group = db.prepare("SELECT id, name FROM groups WHERE id = ?").get(req.params.id);
   if (!group) return res.status(404).json({ error: "Group not found." });
 
   const students = db
     .prepare(
       `SELECT u.id, u.name, u.username, u.phone, u.parent_phone, u.monthly_fee,
-              p.paid AS paid_this_month
+              COALESCE(legacy.paid_amount, 0) + COALESCE(tx.transaction_amount, 0) AS total_paid
        FROM users u
-       LEFT JOIN payments p
-         ON p.student_id = u.id AND p.month = ? AND p.year = ?
+       LEFT JOIN (
+         SELECT student_id, SUM(CASE WHEN paid = 1 THEN amount ELSE 0 END) AS paid_amount
+         FROM payments WHERE month = ? AND year = ? GROUP BY student_id
+       ) legacy ON legacy.student_id = u.id
+       LEFT JOIN (
+         SELECT student_id, SUM(amount) AS transaction_amount
+         FROM payment_transactions WHERE month = ? AND year = ? GROUP BY student_id
+       ) tx ON tx.student_id = u.id
        WHERE u.role = 'student' AND u.active = 1 AND u.group_id = ?
        ORDER BY u.name`
     )
-    .all(month, year, req.params.id)
-    .map((student) => ({ ...student, paid_this_month: !!student.paid_this_month }));
+    .all(month, year, month, year, req.params.id)
+    .map((student) => ({
+      ...student,
+      total_paid: Number(student.total_paid || 0),
+      remaining: Math.max(Number(student.monthly_fee || 0) - Number(student.total_paid || 0), 0),
+      paid_this_month: Number(student.monthly_fee || 0) > 0
+        ? Number(student.total_paid || 0) >= Number(student.monthly_fee || 0)
+        : Number(student.total_paid || 0) > 0,
+    }));
 
   res.json({ ...group, students });
 });

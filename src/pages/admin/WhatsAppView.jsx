@@ -8,9 +8,9 @@ const STATUS_LABELS = {
   authenticated: "Phone authenticated — loading WhatsApp, please wait…",
   ready: "Connected — notifications will send automatically",
   disconnected:
-    "Disconnected — reconnecting automatically, a new QR code should appear shortly",
+    "Disconnected — check the connection error below, then reconnect when the session is available",
   auth_failure:
-    "Authentication failed — reconnecting automatically, a new QR code should appear shortly",
+    "Authentication failed — reconnect to request a new QR code",
 };
 
 export default function WhatsAppView() {

@@ -1,13 +1,19 @@
 import React, { useState, useEffect, useCallback } from "react";
 import GroupModal from "./modals/GroupModal";
-import { api } from "../../api";
+import Modal from "../../components/Modal";
+import { api, MONTH_NAMES } from "../../api";
 import { useToast } from "../../context/ToastContext";
 
 export default function GroupsView({ onSelectStudent }) {
   const [groups, setGroups] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupStudents, setGroupStudents] = useState([]);
-  const [paymentAmounts, setPaymentAmounts] = useState({});
+  const now = new Date();
+  const [paymentMonth, setPaymentMonth] = useState(now.getMonth() + 1);
+  const [paymentYear, setPaymentYear] = useState(now.getFullYear());
+  const [paymentStudent, setPaymentStudent] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
   const [processingPaymentId, setProcessingPaymentId] = useState(null);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -57,13 +63,8 @@ export default function GroupsView({ onSelectStudent }) {
     setSelectedGroup(group);
     setLoadingStudents(true);
     try {
-      const data = await api(`/groups/${group.id}/students`);
+      const data = await api(`/groups/${group.id}/students?month=${paymentMonth}&year=${paymentYear}`);
       setGroupStudents(data.students || []);
-      const initialAmounts = {};
-      (data.students || []).forEach((student) => {
-        initialAmounts[student.id] = student.monthly_fee || 0;
-      });
-      setPaymentAmounts(initialAmounts);
     } catch (err) {
       toast(err.message, false);
       setSelectedGroup(null);
@@ -72,36 +73,39 @@ export default function GroupsView({ onSelectStudent }) {
     }
   };
 
-  const handlePaymentAmountChange = (studentId, value) => {
-    setPaymentAmounts((current) => ({ ...current, [studentId]: value }));
+  useEffect(() => {
+    if (selectedGroup) handleOpenGroup(selectedGroup);
+  }, [paymentMonth, paymentYear]);
+
+  const openPaymentForm = (student) => {
+    setPaymentStudent(student);
+    setPaymentAmount(String(student.remaining > 0 ? student.remaining : student.monthly_fee || ""));
+    setPaymentNote("");
   };
 
-  const handleTogglePayment = async (student) => {
-    const now = new Date();
-    const amount = Number(paymentAmounts[student.id] ?? student.monthly_fee ?? 0);
-    const paid = !student.paid_this_month;
-    setProcessingPaymentId(student.id);
+  const handlePayment = async (event) => {
+    event.preventDefault();
+    if (!paymentStudent) return;
+    const amount = Number(paymentAmount);
+    setProcessingPaymentId(paymentStudent.id);
     try {
       const result = await api("/payments", {
         method: "POST",
         body: {
-          student_id: student.id,
-          month: now.getMonth() + 1,
-          year: now.getFullYear(),
+          student_id: paymentStudent.id,
+          month: paymentMonth,
+          year: paymentYear,
           amount,
-          paid,
+          note: paymentNote,
         },
       });
-      setGroupStudents((current) =>
-        current.map((item) =>
-          item.id === student.id ? { ...item, paid_this_month: paid } : item
-        )
-      );
-      if (paid && result.whatsapp && !result.whatsapp.ok) {
+      if (result.whatsapp && !result.whatsapp.ok) {
         toast(`Payment saved, but WhatsApp failed: ${result.whatsapp.reason}`, false);
       } else {
-        toast(paid ? "Payment applied and parent notified." : "Payment marked unpaid.");
+        toast("Payment saved and parent notified.");
       }
+      setPaymentStudent(null);
+      handleOpenGroup(selectedGroup);
     } catch (err) {
       toast(err.message, false);
     } finally {
@@ -123,6 +127,10 @@ export default function GroupsView({ onSelectStudent }) {
         </div>
 
         <div className="panel card">
+          <div className="toolbar" style={{ marginBottom: "18px" }}>
+            <div><label>Payment month</label><select value={paymentMonth} onChange={(e) => setPaymentMonth(Number(e.target.value))}>{MONTH_NAMES.map((name, index) => <option key={name} value={index + 1}>{name}</option>)}</select></div>
+            <div><label>Year</label><input type="number" value={paymentYear} onChange={(e) => setPaymentYear(Number(e.target.value))} style={{ width: "100px" }} /></div>
+          </div>
           {loadingStudents ? (
             <div className="empty-state">Loading students…</div>
           ) : groupStudents.length === 0 ? (
@@ -133,8 +141,9 @@ export default function GroupsView({ onSelectStudent }) {
                 <tr>
                   <th>Name</th>
                   <th>Parent WhatsApp</th>
-                  <th>Amount</th>
-                  <th>This month</th>
+                  <th>Received</th>
+                  <th>Remaining</th>
+                  <th>Status</th>
                   <th></th>
                 </tr>
               </thead>
@@ -148,32 +157,21 @@ export default function GroupsView({ onSelectStudent }) {
                   >
                     <td>{student.name}</td>
                     <td className="muted mono">{student.parent_phone || "—"}</td>
-                    <td onClick={(event) => event.stopPropagation()}>
-                      <input
-                        type="number"
-                        min="0"
-                        value={paymentAmounts[student.id] ?? student.monthly_fee ?? 0}
-                        onChange={(event) => handlePaymentAmountChange(student.id, event.target.value)}
-                        style={{ width: "90px", padding: "6px 8px" }}
-                      />
-                    </td>
+                    <td className="mono">{student.total_paid}</td>
+                    <td className="mono">{Number(student.monthly_fee || 0) > 0 ? student.remaining : "—"}</td>
                     <td>
-                      <span className={`pill pill-${student.paid_this_month ? "paid" : "unpaid"}`}>
-                        {student.paid_this_month ? "paid" : "unpaid"}
+                      <span className={`pill pill-${student.paid_this_month ? "paid" : student.total_paid > 0 ? "neutral" : "unpaid"}`}>
+                        {student.paid_this_month ? "paid" : student.total_paid > 0 ? "partial" : "unpaid"}
                       </span>
                     </td>
                     <td onClick={(event) => event.stopPropagation()}>
                       <button
                         type="button"
-                        className={`btn ${student.paid_this_month ? "btn-danger" : "btn-primary"}`}
-                        onClick={() => handleTogglePayment(student)}
-                        disabled={processingPaymentId === student.id}
+                        className={`btn ${student.remaining > 0 ? "btn-primary" : ""}`}
+                        onClick={() => openPaymentForm(student)}
+                        disabled={processingPaymentId === student.id || (Number(student.monthly_fee || 0) > 0 && student.remaining <= 0)}
                       >
-                        {processingPaymentId === student.id
-                          ? "Saving…"
-                          : student.paid_this_month
-                            ? "Mark unpaid"
-                            : "Mark paid"}
+                        {Number(student.monthly_fee || 0) > 0 && student.remaining <= 0 ? "Paid" : "Record payment"}
                       </button>
                     </td>
                   </tr>
@@ -182,6 +180,57 @@ export default function GroupsView({ onSelectStudent }) {
             </table>
           )}
         </div>
+        <Modal
+          isOpen={!!paymentStudent}
+          onClose={() => setPaymentStudent(null)}
+          title={paymentStudent ? `Payment for ${paymentStudent.name}` : "Record payment"}
+          maxWidth={440}
+        >
+          {paymentStudent && (
+            <form onSubmit={handlePayment}>
+              <p className="muted" style={{ marginTop: 0 }}>
+                {Number(paymentStudent.monthly_fee || 0) > 0
+                  ? `Received ${paymentStudent.total_paid}; remaining ${paymentStudent.remaining}.`
+                  : `No monthly fee is set. Enter the amount received.`}
+              </p>
+              <div className="field">
+                <label htmlFor="group-payment-amount">Amount received</label>
+                <input
+                  id="group-payment-amount"
+                  type="number"
+                  min="0.01"
+                  max={Number(paymentStudent.monthly_fee || 0) > 0 ? paymentStudent.remaining : undefined}
+                  step="0.01"
+                  required
+                  autoFocus
+                  value={paymentAmount}
+                  onChange={(event) => setPaymentAmount(event.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="group-payment-note">Note</label>
+                <textarea
+                  id="group-payment-note"
+                  rows="3"
+                  value={paymentNote}
+                  onChange={(event) => setPaymentNote(event.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+              <div className="toolbar" style={{ justifyContent: "flex-end" }}>
+                <button type="button" className="btn" onClick={() => setPaymentStudent(null)}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  disabled={processingPaymentId === paymentStudent.id}
+                >
+                  {processingPaymentId === paymentStudent.id ? "Saving…" : "Save payment"}
+                </button>
+              </div>
+            </form>
+          )}
+        </Modal>
       </section>
     );
   }

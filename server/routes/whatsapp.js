@@ -28,11 +28,14 @@ function buildReportMessage(student, type, now) {
       "SELECT exam_name, degree, max_degree, date FROM exams WHERE student_id = ? ORDER BY date DESC"
     )
     .all(student.id);
-  const payments = db
-    .prepare(
-      "SELECT month, year, amount, paid FROM payments WHERE student_id = ? ORDER BY year DESC, month DESC LIMIT 6"
-    )
-    .all(student.id);
+  const payments = db.prepare(
+    `SELECT month, year, SUM(amount) AS amount, 1 AS paid
+     FROM (
+       SELECT month, year, amount FROM payments WHERE student_id = ? AND paid = 1
+       UNION ALL
+       SELECT month, year, amount FROM payment_transactions WHERE student_id = ?
+     ) GROUP BY year, month ORDER BY year DESC, month DESC LIMIT 6`
+  ).all(student.id, student.id);
   const present = attendance.filter((row) => row.status === "present").length;
   const attendanceRate = attendance.length
     ? `${Math.round((present / attendance.length) * 100)}%`

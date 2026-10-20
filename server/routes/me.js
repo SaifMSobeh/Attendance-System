@@ -14,7 +14,7 @@ router.get("/", requireAuth, async (req, res) => {
 
   const student = db
     .prepare(
-      `SELECT u.id, u.name, u.username, u.phone, u.parent_phone, u.qr_token,
+      `SELECT u.id, u.name, u.username, u.phone, u.parent_phone, u.qr_token, u.monthly_fee,
               g.name as group_name
        FROM users u LEFT JOIN groups g ON g.id = u.group_id
        WHERE u.id = ?`
@@ -37,11 +37,14 @@ router.get("/", requireAuth, async (req, res) => {
     )
     .all(req.user.id);
 
-  const payments = db
-    .prepare(
-      "SELECT month, year, amount, paid, paid_date FROM payments WHERE student_id = ? ORDER BY year DESC, month DESC"
-    )
-    .all(req.user.id);
+  const payments = db.prepare(
+    `SELECT month, year, SUM(amount) AS amount, 1 AS paid, MAX(paid_date) AS paid_date
+     FROM (
+       SELECT month, year, amount, paid_date FROM payments WHERE student_id = ? AND paid = 1
+       UNION ALL
+       SELECT month, year, amount, paid_date FROM payment_transactions WHERE student_id = ?
+     ) GROUP BY year, month ORDER BY year DESC, month DESC`
+  ).all(req.user.id, req.user.id);
 
   const totalDays = attendance.length;
   const presentDays = attendance.filter((a) => a.status === "present").length;

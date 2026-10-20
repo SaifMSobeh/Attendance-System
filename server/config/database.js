@@ -112,6 +112,17 @@ CREATE TABLE IF NOT EXISTS payments (
   FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
   UNIQUE(student_id, month, year)
 );
+
+CREATE TABLE IF NOT EXISTS payment_transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+  year INTEGER NOT NULL,
+  amount REAL NOT NULL CHECK (amount > 0),
+  note TEXT,
+  paid_date TEXT NOT NULL,
+  FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
+);
 `);
 
 // ---- Migration: add qr_token to databases created before this feature --

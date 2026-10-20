@@ -78,7 +78,9 @@ export default function AdminDashboard() {
         {currentView === "exams" && (
           <ExamsView onGoToStudents={() => setCurrentView("students")} />
         )}
-        {currentView === "payments" && <PaymentsView />}
+        {currentView === "payments" && (
+          <PaymentsView onSelectStudent={handleSelectStudent} />
+        )}
         {currentView === "whatsapp" && <WhatsAppView />}
         {currentView === "team" && !user?.is_co_admin && <TeamAccountsView />}
       </main>

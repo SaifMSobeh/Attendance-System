@@ -1,7 +1,6 @@
 const express = require("express");
 const db = require("../config/database");
 const { requireAuth, requireAdmin } = require("../middleware/auth");
-const whatsapp = require("../services/whatsapp");
 
 const router = express.Router();
 
@@ -105,6 +104,7 @@ async function markAttendance(studentId, date, status) {
 
     if (student?.parent_phone) {
       const message = buildMessage(student.name, date, admin?.name || "your teacher");
+      const whatsapp = require("../services/whatsapp");
       whatsappResult = await whatsapp.sendMessage(student.parent_phone, message);
       if (whatsappResult.ok) {
         db.prepare(
@@ -143,12 +143,16 @@ router.post("/scan", requireAuth, requireAdmin, async (req, res) => {
 
   const student = db
     .prepare(
-      "SELECT id, name FROM users WHERE qr_token = ? AND role = 'student' AND active = 1"
+      "SELECT id, name, group_id FROM users WHERE qr_token = ? AND role = 'student' AND active = 1"
     )
     .get(token);
 
   if (!student) {
     return res.status(404).json({ error: "This QR code doesn't match any active student." });
+  }
+
+  if (student.group_id) {
+    ensureGroupSessionAbsences(student.group_id, date);
   }
 
   const already = db

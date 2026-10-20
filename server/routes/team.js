@@ -10,7 +10,7 @@ router.get("/", (req, res) => {
   const accounts = db
     .prepare(
       `SELECT id, name, username, active, created_at
-       FROM users WHERE role = 'admin' AND is_co_admin = 1 ORDER BY name`
+           FROM users WHERE role = 'admin' AND is_co_admin = 1 AND active = 1 ORDER BY name`
     )
     .all();
   res.json(accounts);
@@ -38,9 +38,16 @@ router.post("/", (req, res) => {
 });
 
 router.delete("/:id", (req, res) => {
-  db.prepare(
-    "UPDATE users SET active = 0 WHERE id = ? AND role = 'admin' AND is_co_admin = 1"
-  ).run(req.params.id);
+  const result = db
+    .prepare(
+      "UPDATE users SET active = 0, is_co_admin = 0 WHERE id = ? AND role = 'admin'"
+    )
+    .run(req.params.id);
+
+  if (result.changes === 0) {
+    return res.status(404).json({ error: "Team account not found." });
+  }
+
   res.json({ ok: true });
 });
 

@@ -22,18 +22,10 @@ const client = new Client({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   },
-  // Fetches a cached copy of the exact WhatsApp Web version currently live,
-  // instead of relying on whatever shipped with this whatsapp-web.js release.
-  // This is the main fix for "Failed to send message" / "Evaluation failed"
-  // errors that show up after WhatsApp pushes a web client update.
-  webVersionCache: {
-    type: "remote",
-    remotePath:
-      "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html",
-  },
 });
 
 client.on("qr", async (qr) => {
+  clearTimeout(initializationTimeout);
   state.status = "qr";
   state.error = null;
   state.qrDataUrl = await QRCode.toDataURL(qr);
@@ -41,6 +33,7 @@ client.on("qr", async (qr) => {
 });
 
 client.on("ready", () => {
+  clearTimeout(initializationTimeout);
   state.status = "ready";
   state.qrDataUrl = null;
   state.error = null;
@@ -48,7 +41,14 @@ client.on("ready", () => {
   console.log("WhatsApp client is ready and connected.");
 });
 
+client.on("loading_screen", (percent, message) => {
+  if (state.status === "ready") return;
+  state.status = "initializing";
+  state.error = `${message || "WhatsApp"} is loading (${percent}%).`;
+});
+
 client.on("authenticated", () => {
+  if (state.status === "ready") return;
   state.status = "authenticated";
   state.qrDataUrl = null;
   state.error = null;
@@ -56,6 +56,7 @@ client.on("authenticated", () => {
 });
 
 client.on("auth_failure", (msg) => {
+  clearTimeout(initializationTimeout);
   state.status = "auth_failure";
   state.error = msg || "WhatsApp authentication failed.";
   console.error("WhatsApp authentication failed:", msg);
@@ -63,11 +64,10 @@ client.on("auth_failure", (msg) => {
 
 client.on("change_state", (stateName) => {
   console.log("WhatsApp state changed:", stateName);
-  if (stateName === "CONNECTED") {
-    state.status = "ready";
+  if (stateName === "UNPAIRED" || stateName === "UNPAIRED_IDLE") {
+    if (state.status === "ready") state.status = "initializing";
     state.qrDataUrl = null;
-    state.error = null;
-    readyAt = Date.now();
+    state.error = "WhatsApp is logged out. Waiting for a new QR code.";
   }
 });
 
@@ -77,10 +77,57 @@ client.on("error", (err) => {
 });
 
 let reconnecting = false;
-let reconnectPromise = null;
+let reconnectTimer = null;
+let initializationPromise = null;
+let reconnectAttempts = 0;
 let readyAt = 0;
+let initializationTimeout = null;
+let clientInitialized = false;
 
-function waitForReady(timeoutMs = 15000) {
+function isProfileLocked(error) {
+  return /browser is already running|userDataDir/i.test(error?.message || "");
+}
+
+function initializeClient(restart = false) {
+  if (initializationPromise) return initializationPromise;
+  if (state.status === "ready" && !restart) return Promise.resolve();
+
+  initializationPromise = (async () => {
+    if (restart && clientInitialized) {
+      state.status = "initializing";
+      state.error = "Refreshing WhatsApp browser connection…";
+      state.qrDataUrl = null;
+      clearTimeout(initializationTimeout);
+      await client.destroy().catch(() => {});
+      clientInitialized = false;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    state.status = "initializing";
+    state.error = null;
+    clearTimeout(initializationTimeout);
+    initializationTimeout = setTimeout(() => {
+      if (state.status !== "initializing" && state.status !== "authenticated") return;
+      state.status = "disconnected";
+      state.error = "WhatsApp startup timed out. Check that only one server is using the WhatsApp session, then reconnect.";
+    }, 60000);
+    await client.initialize();
+    clientInitialized = true;
+    reconnectAttempts = 0;
+  })().catch((err) => {
+    clearTimeout(initializationTimeout);
+    state.status = "disconnected";
+    state.error = err?.message || "WhatsApp reconnect failed.";
+    console.error("WhatsApp reconnect attempt failed:", err?.message || err);
+    throw err;
+  }).finally(() => {
+    initializationPromise = null;
+  });
+
+  return initializationPromise;
+}
+
+function waitForReady(timeoutMs = 60000) {
   if (state.status === "ready") return Promise.resolve();
 
   return new Promise((resolve, reject) => {
@@ -98,53 +145,51 @@ function waitForReady(timeoutMs = 15000) {
   });
 }
 
-function reconnectClient() {
-  if (reconnectPromise) return reconnectPromise;
-
-  reconnectPromise = (async () => {
-    state.status = "initializing";
-    await client.destroy().catch(() => {});
-    await client.initialize();
-    await waitForReady();
-  })().finally(() => {
-    reconnectPromise = null;
-  });
-
-  return reconnectPromise;
-}
-
 function attemptReconnect(delayMs = 3000) {
-  if (reconnecting) return;
-  reconnecting = true;
-  setTimeout(async () => {
+  if (reconnecting || reconnectTimer || initializationPromise) return;
+
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    reconnecting = true;
+    let nextDelay = null;
     try {
-      await client.destroy().catch(() => {});
-      await client.initialize();
+      await initializeClient(true);
     } catch (err) {
-      state.status = "disconnected";
-      state.error = err?.message || "WhatsApp reconnect failed.";
-      console.error("WhatsApp reconnect attempt failed:", err.message || err);
+      if (!isProfileLocked(err)) {
+        nextDelay = Math.min(30000, 3000 * 2 ** reconnectAttempts);
+        reconnectAttempts += 1;
+      }
     } finally {
       reconnecting = false;
+      if (nextDelay !== null && state.status === "disconnected") {
+        attemptReconnect(nextDelay);
+      }
     }
   }, delayMs);
+}
+
+function scheduleReconnect(delayMs = 3000) {
+  if (reconnectTimer || reconnecting) return;
+  attemptReconnect(delayMs);
 }
 
 client.on("disconnected", (reason) => {
   state.status = "disconnected";
   state.qrDataUrl = null;
+  readyAt = 0;
+  clearTimeout(initializationTimeout);
   state.error = String(reason || "WhatsApp disconnected.");
   console.warn("WhatsApp disconnected:", reason);
-  // The phone unlinked the device (or lost connection). Bring up a fresh
-  // session automatically so a new QR code appears without a server restart.
-  attemptReconnect();
+  scheduleReconnect(3000);
 });
 
-client.initialize().catch((err) => {
-  state.status = "disconnected";
-  state.error = err?.message || "WhatsApp failed to start.";
-  console.error("WhatsApp failed to start:", err.message || err);
-});
+function startClient() {
+  return initializeClient().catch((err) => {
+    if (!isProfileLocked(err)) scheduleReconnect(5000);
+  });
+}
+
+startClient();
 
 /**
  * Normalizes a local phone number into WhatsApp's chat id format.
@@ -152,8 +197,11 @@ client.initialize().catch((err) => {
  * Strips spaces, dashes, plus signs and leading zeros after the country code.
  */
 function toChatId(phone) {
-  const digits = String(phone).replace(/[^\d]/g, "");
-  return `${digits}@c.us`;
+  let digits = String(phone || "").replace(/[^\d]/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  const countryCode = String(process.env.WHATSAPP_COUNTRY_CODE || "20").replace(/\D/g, "");
+  if (countryCode && digits.startsWith("0")) digits = `${countryCode}${digits.slice(1)}`;
+  return digits.length >= 8 ? `${digits}@c.us` : null;
 }
 
 /**
@@ -171,6 +219,7 @@ async function sendMessage(phone, message) {
       await new Promise((resolve) => setTimeout(resolve, remainingWarmup));
     }
     const chatId = toChatId(phone);
+    if (!chatId) return { ok: false, reason: "The parent phone number is invalid." };
     const numberId = await client.getNumberId(chatId);
     if (!numberId) {
       return { ok: false, reason: `The number ${phone} is not registered on WhatsApp.` };
@@ -191,7 +240,8 @@ async function sendMessage(phone, message) {
 
       try {
         if (/detached frame|execution context was destroyed|target closed/i.test(errorMessage)) {
-          await reconnectClient();
+          await initializeClient(true);
+          await waitForReady();
         }
         await new Promise((resolve) => setTimeout(resolve, 1500));
       } catch (reconnectError) {
@@ -200,11 +250,10 @@ async function sendMessage(phone, message) {
     }
   }
 
-  state.status = "disconnected";
   console.error(`WhatsApp send failed for ${phone}:`, lastError);
   return {
     ok: false,
-    reason: "WhatsApp browser connection was refreshed, but the message could not be sent. Try again.",
+    reason: lastError?.message || "WhatsApp could not send the message.",
   };
 }
 
@@ -213,7 +262,9 @@ function getStatus() {
 }
 
 function reconnectNow() {
-  state.status = "initializing";
+  if (state.status === "initializing" || state.status === "authenticated" || state.status === "qr") {
+    return;
+  }
   attemptReconnect(0);
 }
 

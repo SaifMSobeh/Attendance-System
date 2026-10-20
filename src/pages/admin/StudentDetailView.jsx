@@ -4,6 +4,7 @@ import AddExamModal from "./modals/AddExamModal";
 import QrBadgeModal from "./modals/QrBadgeModal";
 import { api, MONTH_NAMES } from "../../api";
 import { useToast } from "../../context/ToastContext";
+import { useAuth } from "../../context/AuthContext";
 
 export default function StudentDetailView({ studentId, onBack }) {
   const [student, setStudent] = useState(null);
@@ -11,6 +12,7 @@ export default function StudentDetailView({ studentId, onBack }) {
   const [isAddExamOpen, setIsAddExamOpen] = useState(false);
   const [qrBadgeData, setQrBadgeData] = useState(null);
   const [isQrOpen, setIsQrOpen] = useState(false);
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const loadStudent = useCallback(async () => {
@@ -75,7 +77,8 @@ export default function StudentDetailView({ studentId, onBack }) {
   const thisMonthPay = payments.find(
     (p) => p.month === now.getMonth() + 1 && p.year === now.getFullYear()
   );
-  const isPaidThisMonth = !!thisMonthPay?.paid;
+  const monthlyFee = Number(student.monthly_fee || 0);
+  const isPaidThisMonth = monthlyFee > 0 && Number(thisMonthPay?.amount || 0) >= monthlyFee;
 
   const subLine = student.group_name
     ? `${student.group_name} · ${student.parent_phone}`
@@ -199,6 +202,7 @@ export default function StudentDetailView({ studentId, onBack }) {
               <tr>
                 <th>Month</th>
                 <th>Amount</th>
+                {!user?.is_co_admin && <th>Note</th>}
                 <th>Status</th>
               </tr>
             </thead>
@@ -209,9 +213,10 @@ export default function StudentDetailView({ studentId, onBack }) {
                     {MONTH_NAMES[p.month - 1]} {p.year}
                   </td>
                   <td className="mono">{p.amount}</td>
+                  {!user?.is_co_admin && <td>{p.note || "—"}</td>}
                   <td>
-                    <span className={`pill pill-${p.paid ? "paid" : "unpaid"}`}>
-                      {p.paid ? "paid" : "unpaid"}
+                    <span className={`pill pill-${p.source === "transaction" ? "neutral" : p.paid ? "paid" : "unpaid"}`}>
+                      {p.source === "transaction" ? "received" : p.paid ? "paid" : "unpaid"}
                     </span>
                   </td>
                 </tr>

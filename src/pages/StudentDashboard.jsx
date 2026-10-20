@@ -73,7 +73,8 @@ export default function StudentDashboard() {
   const thisMonthPay = payments.find(
     (p) => p.month === now.getMonth() + 1 && p.year === now.getFullYear()
   );
-  const isPaidThisMonth = !!thisMonthPay?.paid;
+  const monthlyFee = Number(data.monthly_fee || 0);
+  const isPaidThisMonth = monthlyFee > 0 && Number(thisMonthPay?.amount || 0) >= monthlyFee;
 
   return (
     <div className="app-shell">
